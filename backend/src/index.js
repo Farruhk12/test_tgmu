@@ -1,6 +1,11 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import authRoutes from './routes/auth.js';
 import catalogRoutes from './routes/catalog.js';
@@ -101,6 +106,18 @@ app.post('/api/export-docx', authRequired, async (req, res) => {
     res.status(500).json({ error: err.message || 'Export failed' });
   }
 });
+
+// Статика фронтенда (после сборки: frontend/dist) — один URL на Railway
+const distPath = path.join(__dirname, '..', '..', 'frontend', 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'), (err) => {
+      if (err) next(err);
+    });
+  });
+}
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

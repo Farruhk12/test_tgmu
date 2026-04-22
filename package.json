@@ -1,0 +1,11 @@
+{
+  "name": "medtest-platform",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm ci --prefix backend && npm ci --prefix frontend && npm run build --prefix frontend",
+    "start": "node backend/src/index.js"
+  }
+}
