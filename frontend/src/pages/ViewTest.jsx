@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client';
+import {
+  uiDifficultyScore,
+  difficultyScoreBadgeClass,
+  difficultyScoreBandLabelRu,
+  difficultyBucketLabelRu,
+} from '../lib/questionFormat.js';
 
 export default function ViewTest() {
   const { id } = useParams();
@@ -144,15 +150,26 @@ export default function ViewTest() {
       </div>
 
       <div className="space-y-3">
-        {questions.map((q, i) => (
+        {questions.map((q, i) => {
+          const aiScore = uiDifficultyScore(q);
+          return (
           <div
             key={i}
             className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
           >
             {editing ? (
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-semibold text-slate-500">№ {i + 1}</span>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-500">№ {i + 1}</span>
+                    {aiScore != null && (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-md font-semibold border ${difficultyScoreBadgeClass(aiScore)}`}
+                      >
+                        ИИ: {aiScore}/100 · {difficultyScoreBandLabelRu(aiScore)}
+                      </span>
+                    )}
+                  </div>
                   <button
                     onClick={() => removeQuestion(i)}
                     className="text-xs text-red-600 hover:text-red-800"
@@ -160,6 +177,9 @@ export default function ViewTest() {
                     Удалить вопрос
                   </button>
                 </div>
+                {q.difficulty_note && aiScore != null && (
+                  <p className="text-xs text-slate-500 italic">{q.difficulty_note}</p>
+                )}
                 <textarea
                   value={q.question || ''}
                   onChange={(e) => updateQuestion(i, 'question', e.target.value)}
@@ -196,8 +216,18 @@ export default function ViewTest() {
               </div>
             ) : (
               <>
-                <div className="font-semibold text-slate-900 mb-3">
-                  {i + 1}. {q.question}
+                <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                  <div className="font-semibold text-slate-900">
+                    {i + 1}. {q.question}
+                  </div>
+                  {aiScore != null && (
+                    <span
+                      className={`text-xs px-2 py-1 rounded-lg font-semibold border shrink-0 ${difficultyScoreBadgeClass(aiScore)}`}
+                      title={q.difficulty_note || ''}
+                    >
+                      ИИ: {aiScore}/100 · {difficultyScoreBandLabelRu(aiScore)}
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-1.5 mb-3">
                   {['A', 'B', 'C', 'D'].map((letter) => {
@@ -227,14 +257,20 @@ export default function ViewTest() {
                     {q.explanation}
                   </div>
                 )}
+                {q.difficulty_note && aiScore != null && (
+                  <div className="text-xs text-slate-500 italic mt-2 leading-relaxed">
+                    Оценка сложности: {q.difficulty_note}
+                  </div>
+                )}
               </>
             )}
             <div className="mt-3 text-xs text-slate-400">
-              {q.topic} · {q.type === 'knowledge' ? 'знание' : 'понимание'} ·{' '}
-              {q.difficulty}
+              {q.topic} · {q.type === 'knowledge' ? 'знание' : 'понимание'} · корзина:{' '}
+              {difficultyBucketLabelRu(q.difficulty)}
             </div>
           </div>
-        ))}
+        );
+        })}
       </div>
     </div>
   );

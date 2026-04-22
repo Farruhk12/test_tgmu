@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import MethodologyPanel from '../components/MethodologyPanel.jsx';
 
 export default function Dashboard() {
   const [tests, setTests] = useState([]);
@@ -78,6 +79,11 @@ export default function Dashboard() {
           + Создать тест
         </button>
       </div>
+
+      <MethodologyPanel
+        key={loading ? 'loading' : tests.length === 0 ? 'empty' : 'list'}
+        defaultOpen={!loading && tests.length === 0}
+      />
 
       {err && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4">

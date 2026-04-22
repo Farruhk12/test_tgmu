@@ -8,6 +8,60 @@ import {
 } from 'docx';
 import { questionToSymbolLines } from './questionFormat.js';
 
+const DOCX_LANG_SECTION = {
+  ru: 'Все вопросы на русском языке',
+  tj: 'Все вопросы на таджикском языке',
+  en: 'Все вопросы на английском языке',
+};
+
+function appendTitleCentered(children, title) {
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: title, bold: true })],
+    })
+  );
+}
+
+function appendMetaCentered(children, meta) {
+  if (!meta) return;
+  const lines = [
+    meta.faculty && `Факультет: ${meta.faculty}`,
+    meta.course && `Курс: ${meta.course}`,
+    meta.department && `Кафедра: ${meta.department}`,
+    meta.subject && `Предмет: ${meta.subject}`,
+  ].filter(Boolean);
+
+  for (const line of lines) {
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: line })],
+      })
+    );
+  }
+}
+
+function appendLangHeadingIfChanged(children, lang, prevHolder) {
+  if (!lang || !DOCX_LANG_SECTION[lang]) return;
+  if (prevHolder.v === lang) return;
+  prevHolder.v = lang;
+  children.push(new Paragraph({ text: '' }));
+  children.push(
+    new Paragraph({
+      spacing: { before: 200 },
+      children: [
+        new TextRun({
+          text: DOCX_LANG_SECTION[lang],
+          bold: true,
+          size: 26,
+        }),
+      ],
+    })
+  );
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.title
@@ -25,32 +79,8 @@ async function buildDocxSymbol({ title, test }) {
   const { questions, meta } = test;
   const children = [];
 
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: title, bold: true })],
-    })
-  );
-
-  if (meta) {
-    const lines = [
-      meta.faculty && `Факультет: ${meta.faculty}`,
-      meta.course && `Курс: ${meta.course}`,
-      meta.department && `Кафедра: ${meta.department}`,
-      meta.subject && `Предмет: ${meta.subject}`,
-    ].filter(Boolean);
-
-    for (const line of lines) {
-      children.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: line })],
-        })
-      );
-    }
-  }
-
+  appendTitleCentered(children, title);
+  appendMetaCentered(children, meta);
   children.push(new Paragraph({ text: '' }));
   children.push(
     new Paragraph({
@@ -65,7 +95,9 @@ async function buildDocxSymbol({ title, test }) {
   );
   children.push(new Paragraph({ text: '' }));
 
+  const langHead = { v: null };
   questions.forEach((q) => {
+    appendLangHeadingIfChanged(children, q._outputLang, langHead);
     const lines = questionToSymbolLines(q);
     lines.forEach((line, lineIdx) => {
       children.push(
@@ -91,7 +123,9 @@ async function buildDocxSymbol({ title, test }) {
     })
   );
 
+  const keyLangHead = { v: null };
   questions.forEach((q) => {
+    appendLangHeadingIfChanged(children, q._outputLang, keyLangHead);
     const correct = q.correct;
     const txt = q.options?.[correct] || '—';
     children.push(
@@ -119,40 +153,20 @@ async function buildDocxClassic({ title, test }) {
 
   const children = [];
 
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: title, bold: true })],
-    })
-  );
-
-  if (meta) {
-    const lines = [
-      meta.faculty && `Факультет: ${meta.faculty}`,
-      meta.course && `Курс: ${meta.course}`,
-      meta.department && `Кафедра: ${meta.department}`,
-      meta.subject && `Предмет: ${meta.subject}`,
-    ].filter(Boolean);
-
-    for (const line of lines) {
-      children.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: line })],
-        })
-      );
-    }
-  }
-
+  appendTitleCentered(children, title);
+  appendMetaCentered(children, meta);
   children.push(new Paragraph({ text: '' }));
 
-  questions.forEach((q, i) => {
+  let n = 0;
+  const langHead = { v: null };
+  questions.forEach((q) => {
+    appendLangHeadingIfChanged(children, q._outputLang, langHead);
+    n += 1;
     children.push(
       new Paragraph({
         spacing: { before: 200, after: 100 },
         children: [
-          new TextRun({ text: `${i + 1}. `, bold: true }),
+          new TextRun({ text: `${n}. `, bold: true }),
           new TextRun({ text: q.question }),
         ],
       })
@@ -179,11 +193,15 @@ async function buildDocxClassic({ title, test }) {
     })
   );
 
-  questions.forEach((q, i) => {
+  let k = 0;
+  const keyLangHead = { v: null };
+  questions.forEach((q) => {
+    appendLangHeadingIfChanged(children, q._outputLang, keyLangHead);
+    k += 1;
     children.push(
       new Paragraph({
         children: [
-          new TextRun({ text: `${i + 1}. `, bold: true }),
+          new TextRun({ text: `${k}. `, bold: true }),
           new TextRun({ text: q.correct || '—', bold: true }),
           q.explanation
             ? new TextRun({ text: `  — ${q.explanation}`, italics: true })

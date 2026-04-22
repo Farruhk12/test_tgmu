@@ -76,6 +76,12 @@ export const api = {
   generate: (payload) =>
     request('/generate', { method: 'POST', body: JSON.stringify(payload) }),
 
+  translateQuestions: (questions, language) =>
+    request('/translate-questions', {
+      method: 'POST',
+      body: JSON.stringify({ questions, language }),
+    }),
+
   // tests
   listTests: () => request('/tests'),
   getTest: (id) => request(`/tests/${id}`),

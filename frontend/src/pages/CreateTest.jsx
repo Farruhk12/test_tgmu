@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { questionToSymbolLines } from '../lib/questionFormat.js';
+import {
+  questionToSymbolLines,
+  uiDifficultyScore,
+  difficultyScoreBadgeClass,
+  difficultyScoreBandLabelRu,
+  difficultyBucketLabelRu,
+} from '../lib/questionFormat.js';
+import MethodologyPanel from '../components/MethodologyPanel.jsx';
 
 const MAX_TOPICS = 15;
 const QUICK_FILL_VALUES = [1, 5, 10, 20];
@@ -30,13 +37,26 @@ function sortLangCodes(codes) {
   return LANG_ORDER.filter((c) => codes.includes(c));
 }
 
-function pluralLangRu(n) {
+function flattenGroupsForExport(groups, langCodes) {
+  if (!groups?.length) return [];
+  const langs = sortLangCodes(langCodes);
+  const out = [];
+  for (const lang of langs) {
+    for (const g of groups) {
+      const q = g.variants?.[lang];
+      if (q) out.push(q);
+    }
+  }
+  return out;
+}
+
+function pluralPerevodRu(n) {
   const k = Math.abs(n) % 100;
   const d = k % 10;
-  if (k > 10 && k < 20) return 'языков';
-  if (d > 1 && d < 5) return 'языка';
-  if (d === 1) return 'язык';
-  return 'языков';
+  if (k > 10 && k < 20) return 'переводов';
+  if (d > 1 && d < 5) return 'перевода';
+  if (d === 1) return 'перевод';
+  return 'переводов';
 }
 
 function uid() {
@@ -56,6 +76,75 @@ function SectionCard({ children, className = '', ...rest }) {
       {...rest}
     >
       {children}
+    </div>
+  );
+}
+
+function QuestionGroupCard({ group, displayIndex }) {
+  const langs = sortLangCodes(Object.keys(group.variants || {}));
+  const [tab, setTab] = useState(langs[0] || 'ru');
+
+  const langsKey = langs.join(',');
+
+  useEffect(() => {
+    const ordered = langsKey ? LANG_ORDER.filter((c) => langsKey.split(',').includes(c)) : [];
+    if (ordered.length && !ordered.includes(tab)) {
+      setTab(ordered[0]);
+    }
+  }, [langsKey, tab]);
+
+  const q = group.variants?.[tab];
+  if (!q) return null;
+
+  const qcSource = group.variants?.ru || q;
+  const qcBadge = {
+    pass: { text: 'OK', color: 'bg-emerald-100 text-emerald-700' },
+    revised: { text: 'Исправлен', color: 'bg-amber-100 text-amber-700' },
+    fallback: { text: 'Без ревью', color: 'bg-orange-100 text-orange-700' },
+  }[qcSource._qc];
+  const aiScore = uiDifficultyScore(qcSource);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+      <div className="flex flex-col gap-3 mb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-slate-500">№ {displayIndex + 1}</span>
+            {aiScore != null && (
+              <span
+                className={`text-xs px-2 py-1 rounded-lg font-semibold border ${difficultyScoreBadgeClass(aiScore)}`}
+                title="Трудность для студента: чем выше число, тем сложнее. Не процент и не оценка качества вопроса."
+              >
+                ИИ: {aiScore}/100 · {difficultyScoreBandLabelRu(aiScore)}
+              </span>
+            )}
+          </div>
+          {qcBadge && (
+            <span className={`text-xs px-2 py-1 rounded-lg font-medium ${qcBadge.color}`}>
+              {qcBadge.text}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Язык вопроса">
+          {langs.map((code) => (
+            <button
+              key={code}
+              type="button"
+              role="tab"
+              aria-selected={tab === code}
+              onClick={() => setTab(code)}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors ${
+                tab === code
+                  ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                  : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              {LANG_LABEL[code] || code}
+            </button>
+          ))}
+        </div>
+      </div>
+      <QuestionSymbolPreview q={q} index={displayIndex} hideHeader />
     </div>
   );
 }
@@ -141,7 +230,7 @@ export default function CreateTest() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: '' });
   const [result, setResult] = useState(null);
-  const [liveQuestions, setLiveQuestions] = useState([]);
+  const [liveGroups, setLiveGroups] = useState([]);
   const [err, setErr] = useState('');
 
   const [addingDept, setAddingDept] = useState(false);
@@ -214,7 +303,8 @@ export default function CreateTest() {
     canProceedStep1 &&
     selectedLangs.length > 0;
 
-  const totalCalls = apiTopics.length * selectedLangs.length;
+  const translateCount = sortLangCodes(selectedLangs).filter((l) => l !== 'ru').length;
+  const totalCalls = apiTopics.length * (1 + translateCount);
 
   function addTopicByName(raw) {
     const name = raw.trim();
@@ -337,7 +427,7 @@ export default function CreateTest() {
     }
     setGenerating(true);
     setErr('');
-    setLiveQuestions([]);
+    setLiveGroups([]);
     setResult(null);
 
     const basePayload = {
@@ -348,51 +438,93 @@ export default function CreateTest() {
       skipReview,
     };
 
-    const allQuestions = [];
+    const allGroups = [];
     const allLog = [];
     const total = apiTopics.length;
-    const langList = selectedLangs.map((l) => LANG_LABEL[l]).join(', ');
+    const langs = sortLangCodes(selectedLangs);
+    const translateTargets = langs.filter((l) => l !== 'ru');
 
     try {
       for (let i = 0; i < apiTopics.length; i++) {
         const item = apiTopics[i];
         const diffLabel = DIFF_LABEL_RU[item.difficulty] || item.difficulty;
+        const trPart = translateTargets.length
+          ? ` · RU + перевод: ${translateTargets.map((l) => LANG_LABEL[l]).join(', ')}`
+          : ' · русский';
         setProgress({
           current: i + 1,
           total,
-          label: `«${item.topic}», ${diffLabel} (${item.count}) — ${langList}`,
+          label: `«${item.topic}», ${diffLabel} (${item.count})${trPart}`,
         });
 
-        const results = await Promise.all(
-          selectedLangs.map((language) =>
-            api
-              .generate({ ...basePayload, language, topics: [item] })
-              .then((res) => ({ language, res }))
-              .catch((err) => ({ language, error: err.message }))
-          )
+        let resRu;
+        try {
+          resRu = await api.generate({ ...basePayload, language: 'ru', topics: [item] });
+        } catch (e) {
+          allLog.push({
+            topic: item.topic,
+            type: item.type,
+            difficulty: item.difficulty,
+            steps: [{ step: 'generate', status: 'error', error: e.message }],
+          });
+          continue;
+        }
+
+        const ruQs = Array.isArray(resRu.questions) ? resRu.questions : [];
+        if (ruQs.length === 0) {
+          if (Array.isArray(resRu.log)) allLog.push(...resRu.log);
+          continue;
+        }
+
+        const byLang = {
+          ru: ruQs.map((q) => ({
+            ...q,
+            _outputLang: 'ru',
+            _qc: q._qc,
+          })),
+        };
+
+        await Promise.all(
+          translateTargets.map(async (lang) => {
+            const out = await api.translateQuestions(ruQs, lang);
+            const translated = Array.isArray(out.questions) ? out.questions : [];
+            byLang[lang] = translated.map((q, j) => ({
+              ...q,
+              _outputLang: lang,
+              _qc: ruQs[j]?._qc ?? q._qc,
+            }));
+          })
         );
 
-        for (const r of results) {
-          if (r.error) {
-            allLog.push({
-              topic: item.topic,
-              type: item.type,
-              difficulty: item.difficulty,
-              steps: [{ step: 'generate', status: 'error', error: r.error }],
-            });
-            continue;
+        const newGroups = [];
+        for (let j = 0; j < ruQs.length; j++) {
+          const variants = {};
+          for (const lang of langs) {
+            const raw = byLang[lang]?.[j];
+            if (raw) {
+              variants[lang] = {
+                ...raw,
+                _outputLang: lang,
+                _qc: ruQs[j]._qc,
+              };
+            }
           }
-          const { language, res } = r;
-          const batch = (Array.isArray(res.questions) ? res.questions : []).map((q) => ({
-            ...q,
-            _outputLang: language,
-          }));
-          allQuestions.push(...batch);
-          setLiveQuestions((prev) => [...prev, ...batch]);
-          if (Array.isArray(res.log)) allLog.push(...res.log);
+          newGroups.push({
+            groupId: uid(),
+            topic: ruQs[j].topic ?? item.topic,
+            type: ruQs[j].type ?? item.type,
+            difficulty: ruQs[j].difficulty ?? item.difficulty,
+            variants,
+          });
         }
+
+        allGroups.push(...newGroups);
+        setLiveGroups((prev) => [...prev, ...newGroups]);
+        if (Array.isArray(resRu.log)) allLog.push(...resRu.log);
       }
-      setResult({ questions: allQuestions, log: allLog });
+
+      const flatQuestions = flattenGroupsForExport(allGroups, langs);
+      setResult({ groups: allGroups, questions: flatQuestions, log: allLog });
       setStep(3);
     } catch (e) {
       setErr(
@@ -428,7 +560,9 @@ export default function CreateTest() {
           contentLangs: selectedLangs,
           skipReview,
         },
-        questions: result.questions,
+        questions: result.groups?.length
+          ? flattenGroupsForExport(result.groups, sortLangCodes(selectedLangs))
+          : result.questions,
         pipelineLog: result.log,
       });
       navigate(`/tests/${id}`);
@@ -451,6 +585,8 @@ export default function CreateTest() {
           ← К списку тестов
         </button>
       </div>
+
+      <MethodologyPanel />
 
       <Stepper step={step} />
 
@@ -533,10 +669,10 @@ export default function CreateTest() {
                   );
                 })}
               </div>
-              {selectedLangs.length > 1 && (
+              {translateCount > 0 && (
                 <p className="text-xs text-slate-500 mt-2">
-                  Вопросы на каждом языке генерируются параллельно: {selectedLangs.length}×
-                  запросов на каждый блок.
+                  Сначала генерируется русская версия блока, затем она переводится на выбранные языки —
+                  один и тот же вопрос во всех вкладках.
                 </p>
               )}
             </div>
@@ -816,15 +952,19 @@ export default function CreateTest() {
               </span>
               <span className="text-xs text-slate-500">
                 Блоков: {apiTopics.length}
-                {selectedLangs.length > 1
-                  ? ` × ${selectedLangs.length} ${pluralLangRu(selectedLangs.length)} = ${totalCalls} запросов к ИИ`
+                {translateCount > 0
+                  ? ` · на блок: 1 генерация + ${translateCount} ${pluralPerevodRu(translateCount)} = ${totalCalls} запросов к ИИ`
                   : ` (${totalCalls} запрос${totalCalls === 1 ? '' : 'ов'})`}
               </span>
             </div>
           </SectionCard>
 
           <SectionCard>
-            <SectionBadge n={4} title="Генерация" hint="Запросы к ИИ идут параллельно по языкам." />
+            <SectionBadge
+              n={4}
+              title="Генерация"
+              hint="Сначала русский блок, затем перевод на отмеченные языки — в превью одна карточка с вкладками."
+            />
 
             <label className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200 mb-4 cursor-pointer hover:bg-slate-100 transition-colors">
               <input
@@ -884,12 +1024,12 @@ export default function CreateTest() {
             )}
           </SectionCard>
 
-          {(liveQuestions.length > 0 || generating) && (
+          {(liveGroups.length > 0 || generating) && (
             <SectionCard>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-900">
-                    Вопросы по мере готовности ({liveQuestions.length})
+                    Вопросы по мере готовности ({liveGroups.length})
                   </h2>
                   <p className="text-sm text-slate-500 mt-1">
                     Формат: <code className="text-xs bg-slate-100 px-1 rounded">@</code> вопрос,{' '}
@@ -899,22 +1039,20 @@ export default function CreateTest() {
                 </div>
                 <button
                   type="button"
-                  disabled={liveQuestions.length === 0}
-                  onClick={() => handleExportWord(liveQuestions)}
+                  disabled={liveGroups.length === 0}
+                  onClick={() =>
+                    handleExportWord(flattenGroupsForExport(liveGroups, sortLangCodes(selectedLangs)))
+                  }
                   className="shrink-0 border-2 border-brand-500 text-brand-700 px-4 py-2.5 rounded-xl font-medium text-sm hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Скачать Word
                 </button>
               </div>
               <div className="space-y-4">
-                {liveQuestions.map((q, i) => (
-                  <QuestionSymbolPreview
-                    key={`${i}-${q.question?.slice(0, 20)}`}
-                    q={q}
-                    index={i}
-                  />
+                {liveGroups.map((g, i) => (
+                  <QuestionGroupCard key={g.groupId} group={g} displayIndex={i} />
                 ))}
-                {generating && liveQuestions.length === 0 && (
+                {generating && liveGroups.length === 0 && (
                   <div className="text-sm text-slate-500 text-center py-8 flex items-center justify-center gap-2">
                     <Spinner className="w-4 h-4" />
                     Ожидаем первый блок…
@@ -934,11 +1072,18 @@ export default function CreateTest() {
             </div>
             <div className="flex-1">
               <div className="font-semibold text-emerald-900">
-                Сгенерировано {result.questions.length} вопрос
-                {result.questions.length === 1 ? '' : 'ов'}
+                Сгенерировано {result.groups?.length ?? 0} вопрос
+                {(result.groups?.length ?? 0) === 1 ? '' : 'ов'}
+                {result.questions?.length ? (
+                  <span className="font-normal text-emerald-800">
+                    {' '}
+                    ({result.questions.length} формулировок с учётом языков)
+                  </span>
+                ) : null}
               </div>
               <div className="text-sm text-emerald-800 mt-0.5">
-                Проверьте результаты и сохраните тест в личный кабинет.
+                Переключайте язык вкладками в каждой карточке. Сохранение и Word: сначала все вопросы на
+                русском, затем все на таджикском, затем все на английском (только отмеченные языки).
               </div>
             </div>
           </div>
@@ -956,8 +1101,8 @@ export default function CreateTest() {
           </div>
 
           <div className="space-y-3">
-            {result.questions.map((q, i) => (
-              <QuestionSymbolPreview key={i} q={q} index={i} />
+            {(result.groups || []).map((g, i) => (
+              <QuestionGroupCard key={g.groupId || i} group={g} displayIndex={i} />
             ))}
           </div>
 
@@ -965,7 +1110,7 @@ export default function CreateTest() {
             <button
               type="button"
               onClick={() => {
-                setLiveQuestions([]);
+                setLiveGroups([]);
                 setStep(2);
               }}
               className="text-slate-600 hover:text-slate-900 font-medium"
@@ -1198,31 +1343,17 @@ function lineClass(line) {
   return 'text-slate-800';
 }
 
-function QuestionSymbolPreview({ q, index }) {
+function QuestionSymbolPreview({ q, index, hideHeader = false }) {
   const lines = questionToSymbolLines(q);
+  const aiScore = uiDifficultyScore(q);
   const qcBadge = {
     pass: { text: 'OK', color: 'bg-emerald-100 text-emerald-700' },
     revised: { text: 'Исправлен', color: 'bg-amber-100 text-amber-700' },
     fallback: { text: 'Без ревью', color: 'bg-orange-100 text-orange-700' },
   }[q._qc] || null;
 
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-slate-500">№ {index + 1}</span>
-          {q._outputLang && (
-            <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-              {LANG_LABEL[q._outputLang] || q._outputLang}
-            </span>
-          )}
-        </div>
-        {qcBadge && (
-          <span className={`text-xs px-2 py-1 rounded-lg font-medium ${qcBadge.color}`}>
-            {qcBadge.text}
-          </span>
-        )}
-      </div>
+  const inner = (
+    <>
       <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed bg-slate-50 rounded-lg p-4 border border-slate-100 overflow-x-auto">
         {lines.map((line, i) => (
           <span key={i} className={`block ${lineClass(line)}`}>
@@ -1236,8 +1367,53 @@ function QuestionSymbolPreview({ q, index }) {
         </div>
       )}
       <div className="mt-2 text-xs text-slate-400">
-        {q.topic} · {q.type === 'knowledge' ? 'знание' : 'понимание'} · {q.difficulty}
+        {q.topic} · {q.type === 'knowledge' ? 'знание' : 'понимание'} · корзина:{' '}
+        {difficultyBucketLabelRu(q.difficulty)}
+        {aiScore != null && (
+          <span
+            className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded border font-medium text-slate-700 ${difficultyScoreBadgeClass(aiScore)}`}
+            title="Больше балл = сложнее вопрос для студента"
+          >
+            ИИ {aiScore}/100 ({difficultyScoreBandLabelRu(aiScore)})
+          </span>
+        )}
       </div>
+      {q.difficulty_note && aiScore != null && (
+        <p className="text-xs text-slate-500 italic mt-1.5 leading-snug">{q.difficulty_note}</p>
+      )}
+    </>
+  );
+
+  if (hideHeader) {
+    return <div>{inner}</div>;
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-slate-500">№ {index + 1}</span>
+          {aiScore != null && (
+            <span
+              className={`text-xs px-2 py-0.5 rounded-md font-semibold border ${difficultyScoreBadgeClass(aiScore)}`}
+              title="Чем выше — тем сложнее для студента"
+            >
+              ИИ: {aiScore}/100 · {difficultyScoreBandLabelRu(aiScore)}
+            </span>
+          )}
+          {q._outputLang && (
+            <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+              {LANG_LABEL[q._outputLang] || q._outputLang}
+            </span>
+          )}
+        </div>
+        {qcBadge && (
+          <span className={`text-xs px-2 py-1 rounded-lg font-medium ${qcBadge.color}`}>
+            {qcBadge.text}
+          </span>
+        )}
+      </div>
+      {inner}
     </div>
   );
 }

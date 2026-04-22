@@ -13,6 +13,7 @@ import testsRoutes from './routes/tests.js';
 import { authRequired } from './middleware/auth.js';
 import { runPipeline } from './services/pipeline.js';
 import { buildDocx } from './services/docx.js';
+import { translateQuestionsBatch } from './services/translateQuestions.js';
 
 const app = express();
 
@@ -76,6 +77,25 @@ app.post('/api/generate', authRequired, async (req, res) => {
   } catch (err) {
     console.error('Pipeline error:', err);
     res.status(500).json({ error: err.message || 'Pipeline failed' });
+  }
+});
+
+/** Перевод уже сгенерированных вопросов (RU → TJ/EN). */
+app.post('/api/translate-questions', authRequired, async (req, res) => {
+  try {
+    const { questions, language } = req.body;
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: 'questions[] required' });
+    }
+    const lang = language && ['ru', 'tj', 'en'].includes(language) ? language : null;
+    if (!lang) {
+      return res.status(400).json({ error: 'language must be ru, tj, or en' });
+    }
+    const translated = await translateQuestionsBatch(questions, lang);
+    res.json({ questions: translated });
+  } catch (err) {
+    console.error('translate-questions:', err);
+    res.status(500).json({ error: err.message || 'Translation failed' });
   }
 });
 
