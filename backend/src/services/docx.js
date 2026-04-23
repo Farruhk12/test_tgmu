@@ -14,6 +14,30 @@ const DOCX_LANG_SECTION = {
   en: 'Все вопросы на английском языке',
 };
 
+const DOCX_INSTRUCTION = {
+  ru: 'Инструкция: внимательно прочитайте каждый вопрос и выберите ОДИН правильный ответ из предложенных вариантов (A, B, C или D). За каждый правильный ответ начисляется 1 балл.',
+  tj: 'Дастурамал: ҳар як саволро бодиққат хонед ва аз вариантҳои пешниҳодшуда ЯК ҷавоби дурустро интихоб кунед (A, B, C ё D). Барои ҳар як ҷавоби дуруст 1 хол дода мешавад.',
+  en: 'Instructions: read each question carefully and select ONE correct answer from the options provided (A, B, C, or D). One point is awarded for each correct answer.',
+};
+
+function appendInstruction(children, lang) {
+  const text = DOCX_INSTRUCTION[lang] || DOCX_INSTRUCTION.ru;
+  children.push(
+    new Paragraph({
+      spacing: { before: 160, after: 160 },
+      border: {
+        top: { style: 'single', size: 6, color: '4A90D9' },
+        bottom: { style: 'single', size: 6, color: '4A90D9' },
+        left: { style: 'single', size: 6, color: '4A90D9' },
+        right: { style: 'single', size: 6, color: '4A90D9' },
+      },
+      children: [
+        new TextRun({ text, italics: true, size: 22 }),
+      ],
+    })
+  );
+}
+
 function appendTitleCentered(children, title) {
   children.push(
     new Paragraph({
@@ -81,6 +105,11 @@ async function buildDocxSymbol({ title, test }) {
 
   appendTitleCentered(children, title);
   appendMetaCentered(children, meta);
+  children.push(new Paragraph({ text: '' }));
+
+  const firstLang = questions[0]?._outputLang || 'ru';
+  appendInstruction(children, firstLang);
+
   children.push(new Paragraph({ text: '' }));
   children.push(
     new Paragraph({
@@ -155,6 +184,10 @@ async function buildDocxClassic({ title, test }) {
 
   appendTitleCentered(children, title);
   appendMetaCentered(children, meta);
+  children.push(new Paragraph({ text: '' }));
+
+  const firstLang = questions[0]?._outputLang || 'ru';
+  appendInstruction(children, firstLang);
   children.push(new Paragraph({ text: '' }));
 
   let n = 0;
